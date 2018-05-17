@@ -40,7 +40,16 @@ function showCollection(name) {
 
     let columns = [];
     columnNames.forEach((item) => {
-      let col = {field: item, caption: item, sortable: true, searchable: true, size: (1.0/columnNames.length*100)+'%'};
+      let col = {
+        field: item,
+        caption: item,
+        sortable: true,
+        searchable: true,
+        size: (1.0/columnNames.length*100)+'%'
+      };
+      if (item != '_id') {
+        col.editable = { type: 'text' };
+      }
       columns.push(col);
     });
 
@@ -48,7 +57,49 @@ function showCollection(name) {
       name: 'grid_'+name,
       show: {toolbar: true},
       columns: columns,
-      records: db
+      records: db,
+      toolbar: {
+        items: [
+          { id: 'add', type: 'button', caption: 'Add Record', icon: 'w2ui-icon-plus' },
+          { id: 'save', type: 'button', caption: 'Save', icon: 'w2ui-icon-check' }
+        ],
+        onClick: function (event) {
+          switch (event.target) {
+            case 'add':
+              Meteor.call('insertRecord', name, function(err, data) {
+                data._ids.forEach((item_id) => {
+                  w2ui['grid_'+name].add({ recid: w2ui['grid_'+name].records.length + 1, _id: _id(item_id) });
+                });
+              });
+              break;
+            case 'save':
+              let update = [];
+              let changes = w2ui['grid_'+name].getChanges()
+              if (changes.length < 1) {
+                // nothing changed
+                return;
+              }
+              changes.forEach((change) => {
+                db.forEach((db_item) => {
+                  if (db_item.recid == change.recid) {
+                    let c = Object.assign({}, change);
+                    delete c['recid']
+                    update.push({
+                      _id: db_item._id,
+                      fields: c,
+                    })
+                  }
+                })
+              });
+              Meteor.call('updateRecord', name, update, function(err, data) {
+                console.log(err);
+                console.log(data);
+                showCollection(name);
+              });
+              break;
+          }
+        }
+      }
     }
     if (w2uiGrid) {
       w2uiGrid.destroy();
