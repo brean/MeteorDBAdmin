@@ -7,29 +7,94 @@ import './main.css';
 import './main.html';
 
 
-function _id(_id) {
-  let str = '';
-  // id is already a string - default for meteor data
-  if (typeof _id === 'string') {
-    return _id;
-  }
-  // get id as hex from ObjectId-Uint8Array
-  // default for direct mongodb insert
-  _id.id.forEach((item) => {
-    str+=parseInt(item).toString(16);
-  })
-  return str;
+let w2uiGrid = null;
+
+function insertRecord(name) {
+  Meteor.call('insertRecord', name, function(err, data) {
+    data._ids.forEach((item_id) => {
+      w2ui['grid_'+name].add({ recid: w2ui['grid_'+name].records.length + 1, _id: item_id });
+    });
+  });
 }
 
+function databaseEntryFromRecordId(db, recid) {
+  // gets record id (recid) and returns database entry (including _id)
+  return db.find((entry) => {
+    return entry.recid == recid;
+  });
+}
 
-let w2uiGrid = null;
+function deleteRecord(db, name) {
+  let selection = w2ui['grid_'+name].getSelection();
+  if (selection.length < 1) {
+    // nothing changed
+    return;
+  }
+  // single select
+  let dbItem = databaseEntryFromRecordId(db, selection[0]);
+  if (!dbItem) {
+    return;
+  }
+  Meteor.call('deleteRecord', name, dbItem._id, function(err, data) {
+    showCollection(name);
+  })
+}
+
+function saveChanges(db, name) {
+  let update = [];
+  let changes = w2ui['grid_'+name].getChanges()
+  if (changes.length < 1) {
+    // nothing changed
+    return;
+  }
+  changes.forEach((change) => {
+    let dbItem = databaseEntryFromRecordId(db, change.recid)
+    if (!dbItem) {
+      return;
+    }
+
+    let c = Object.assign({}, change);
+    delete c['recid']
+    update.push({
+      _id: dbItem._id,
+      fields: c,
+    });
+  });
+  Meteor.call('updateRecord', name, update, function(err, data) {
+    showCollection(name);
+  });
+}
+
+function buttonClicked(db, name) {
+  return function(event) {
+    switch (event.target) {
+      case 'add':
+        insertRecord(name);
+        break;
+      case 'save':
+        saveChanges(db, name);
+        break;
+      case 'delete':
+        deleteRecord(db, name);
+        break;
+    }
+  }
+}
+
+function recordSelected(event) {
+  w2uiGrid.toolbar.enable('delete');
+}
+
+function recordDeSelected(event) {
+  w2uiGrid.toolbar.disable('delete');
+}
 
 function showCollection(name) {
   Meteor.call('collection', name, function(err, db) {
     let columnNames = [];
     let i = 0;
     db.forEach((item) => {
-      item['_id'] = _id(item['_id']);
+      item['_id'] = item['_id'];
       Object.keys(item).forEach((key) => {
         if (columnNames.indexOf(key) == -1) {
           columnNames.push(key);
@@ -56,55 +121,25 @@ function showCollection(name) {
     let grid = {
       name: 'grid_'+name,
       show: {toolbar: true},
+      multiSelect: false,
       columns: columns,
       records: db,
       toolbar: {
         items: [
+          { id: 'delete', type: 'button', caption: 'Delete', icon: 'w2ui-icon-cross' },
           { id: 'add', type: 'button', caption: 'Add Record', icon: 'w2ui-icon-plus' },
           { id: 'save', type: 'button', caption: 'Save', icon: 'w2ui-icon-check' }
         ],
-        onClick: function (event) {
-          switch (event.target) {
-            case 'add':
-              Meteor.call('insertRecord', name, function(err, data) {
-                data._ids.forEach((item_id) => {
-                  w2ui['grid_'+name].add({ recid: w2ui['grid_'+name].records.length + 1, _id: _id(item_id) });
-                });
-              });
-              break;
-            case 'save':
-              let update = [];
-              let changes = w2ui['grid_'+name].getChanges()
-              if (changes.length < 1) {
-                // nothing changed
-                return;
-              }
-              changes.forEach((change) => {
-                db.forEach((db_item) => {
-                  if (db_item.recid == change.recid) {
-                    let c = Object.assign({}, change);
-                    delete c['recid']
-                    update.push({
-                      _id: db_item._id,
-                      fields: c,
-                    })
-                  }
-                })
-              });
-              Meteor.call('updateRecord', name, update, function(err, data) {
-                console.log(err);
-                console.log(data);
-                showCollection(name);
-              });
-              break;
-          }
-        }
-      }
+        onClick: buttonClicked(db, name)
+      },
+      onSelect: recordSelected,
+      onUnselect: recordDeSelected
     }
     if (w2uiGrid) {
       w2uiGrid.destroy();
     }
     w2uiGrid = $().w2grid(grid);
+    w2uiGrid.toolbar.disable('delete');
     window.w2ui.layout.content('main', w2uiGrid);
   });
 }

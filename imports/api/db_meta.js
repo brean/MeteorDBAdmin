@@ -1,6 +1,6 @@
 import { Meteor } from 'meteor/meteor';
 import { Mongo } from 'meteor/mongo';
-var ObjectId = require('mongodb').ObjectID;
+import { Random } from 'meteor/random';
 
 if (Meteor.isServer) {
   function getCollection(name, callback) {
@@ -35,43 +35,56 @@ if (Meteor.isServer) {
       });
       return future.wait();
     },
-    'insertRecord': function(name) {
+    'deleteRecord': function(name, _id) {
       let future = new Future();
       getCollection(name, function(item) {
-        item.insert({}, {}, function(err, item) {
+        // default for mongodb is to use random strings, so we'll do the same
+        item.remove({_id: _id}, {}, function(err, item) {
+          future.return({});
+        });
+      });
+      return future.wait();
+    },
+    'insertRecord': function(name) {
+      // create new entry
+      let future = new Future();
+      getCollection(name, function(item) {
+        // default for mongodb is to use random strings, so we'll do the same
+        _id = Random.id();
+        item.insert({_id: _id}, {}, function(err, item) {
           future.return({_ids: item.insertedIds});
         });
       });
       return future.wait();
     },
     'updateRecord': function(name, update) {
+      // update single record (from inline-editing)
       let future = new Future();
       getCollection(name, function(item) {
         let i = 0;
+        function updateDone(err, item) {
+          i++;
+          if (i == update.length) {
+            future.return({changed: i});
+          }
+        };
         update.forEach((data) => {
-          if (!data._id || data._id.length < 12) {
+          if (!data._id) {
             return
           }
           item.update(
-            {_id: ObjectId(data._id)},
+            {_id: data._id},
             {$set: data.fields},
             {upsert: false, multi: false},
-            function(err, item) {
-              i++;
-              console.log(data.fields);
-              console.log(data._id);
-              if (i == update.length) {
-                future.return({changed: i});
-              }
-            }
+            updateDone
           );
         });
       });
       return future.wait();
     },
     'collection': function(name) {
+      // get all collection entries by name
       let future = new Future();
-      // TODO: spaghetti!
       getCollection(name, function(item) {
         item.count({}, {}, (err, count) => {
           item.find({}, {}, (err, docs) => {
